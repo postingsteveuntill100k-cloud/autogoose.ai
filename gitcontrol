@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+import argparse
+import subprocess
+import requests
+import os
+import sys
+
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+REPO = os.environ.get("GITHUB_REPOSITORY")
+
+def status():
+    """Uses the GitHub API to check if Runner-01, Scout-02, or Muscle-03 are 'In_Progress'."""
+    if not GITHUB_TOKEN or not REPO:
+        print("GITHUB_TOKEN and GITHUB_REPOSITORY environment variables must be set.")
+        return
+
+    url = f"https://api.github.com/repos/{REPO}/actions/runs"
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        runs = response.json().get('workflow_runs', [])
+        nodes = ['Runner-01', 'Scout-02', 'Muscle-03']
+        for node in nodes:
+            # Check if there is any 'in_progress' run for the node
+            node_runs = [r for r in runs if r['name'] == node and r['status'] == 'in_progress']
+            if node_runs:
+                print(f"{node} is In_Progress")
+            else:
+                print(f"{node} is Idle")
+    else:
+        print(f"Failed to fetch status: {response.status_code} {response.text}")
+
+def fire(node):
+    """Sends the repository_dispatch to wake a specific 16GB runner."""
+    if not GITHUB_TOKEN or not REPO:
+        print("GITHUB_TOKEN and GITHUB_REPOSITORY environment variables must be set.")
+        return
+
+    url = f"https://api.github.com/repos/{REPO}/dispatches"
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    data = {
+        "event_type": f"fire_{node}"
+    }
+
+    response = requests.post(url, headers=headers, json=data)
+    if response.status_code == 204:
+        print(f"Successfully fired {node}.")
+    else:
+        print(f"Failed to fire {node}: {response.status_code} {response.text}")
+
+def connect(node):
+    """Automatically SSHs into the runner via the reverse tunnel."""
+    port_map = {
+        "Runner-01": 2222,
+        "Scout-02": 2223,
+        "Muscle-03": 2224
+    }
+
+    if node not in port_map:
+        print(f"Unknown node '{node}'. Valid nodes: Runner-01, Scout-02, Muscle-03")
+        return
+
+    port = port_map[node]
+    print(f"Connecting to {node} on localhost:{port}...")
+    subprocess.call(["ssh", "-p", str(port), "runner@localhost"])
+
+def main():
+    parser = argparse.ArgumentParser(description="gitcontrol CLI - The Dashboard")
+    parser.add_argument("--status", action="store_true", help="Check status of Muscle nodes")
+    parser.add_argument("--fire", type=str, metavar="NODE", help="Wake up a specific runner node")
+    parser.add_argument("--connect", type=str, metavar="NODE", help="SSH into the specific runner node")
+
+    args = parser.parse_args()
+
+    if args.status:
+        status()
+    elif args.fire:
+        fire(args.fire)
+    elif args.connect:
+        connect(args.connect)
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()
